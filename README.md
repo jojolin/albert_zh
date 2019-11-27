@@ -67,7 +67,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
 ```
 
-## train
+## Train & Test
 - 下载预训练模型, 参考[albert_tiny](https://github.com/brightmart/albert_zh) 
 - 数据准备
   - 文件结构
@@ -145,8 +145,8 @@ model_config_list {
 - 利用`docker tf.serving`提供服务
   - `cd albert_lac_ipynbs`
   - 创建软链：`ln -s ../export_serving_remy_lac albert_remy_lac`
-  - 运行tfserving, no gpu: `sh start-tf1.14.0-rc.sh albert_remy_lac`
-  - 运行tfserving, gpu: `sh start-tfgpu1.14.0.sh albert_remy_lac`
+  - 运行tf.serving, no gpu: `sh start-tf1.14.0-rc.sh albert_remy_lac`
+  - 运行tf.serving, gpu: `sh start-tfgpu1.14.0.sh albert_remy_lac`
 
 ```
 albert_lac_ipynbs/
@@ -154,17 +154,14 @@ albert_lac_ipynbs/
 ├── main.ipynb
 ├── main.py
 ├── merge_lac.py
-├── __pycache__
-│   ├── merge_lac.cpython-36.pyc
-│   └── tokenization.cpython-36.pyc
 ├── start-tf1.14.0-rc.sh
 ├── start-tfgpu1.14.0.sh
 └── tokenization.py
 
 ``` 
 
-## 提供服务
-- 查看模型接口标签 `saved_model_cli show --dir '$dir1' --tag_set serve --signature_def serving_default`
+## Client
+- 查看模型接口 `saved_model_cli show --dir '$dir1' --tag_set serve --signature_def serving_default`
   - $dir1: 'export\_serving\_remy\_lac/1574843457'
 
 ```
@@ -232,7 +229,7 @@ def predict(input_ids, input_mask, segment_ids, label_ids, hostport_http, versio
 ```
 - 预测性能
   - gpu: GeForce RTX 2080-ti
-  - [tiny版](https://storage.googleapis.com/albert_zh/albert_tiny_489k.zip): 单线程，100个请求, ~3s/~2s (no gpu/gpu)
+  - [tiny版](https://storage.googleapis.com/albert_zh/albert_tiny_489k.zip): 单线程，200个请求, ~6s/~3s (no gpu/gpu)
   - [base版](https://storage.googleapis.com/albert_zh/albert_base_zh_additional_36k_steps.zip): 单线程，100个请求, ~10s/~5s(no gpu/gpu)
 
 - 准确性
@@ -252,6 +249,7 @@ global_step = 18748
 loss = 335.19763
 
 base版
+# TODO: 
 
 ```
 
