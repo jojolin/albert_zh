@@ -122,9 +122,14 @@ export_serving_remy_lac/
 │   └── variables
 │       ├── variables.data-00000-of-00001
 │       └── variables.index
+├── 1574903339
+│   ├── saved_model.pb
+│   └── variables
+│       ├── variables.data-00000-of-00001
+│       └── variables.index
 └── models.config
 ```
-  - 其中,`models.config`为自己添加的文件, `1574843457`为导出模型版本号
+  - 其中,`models.config`为自己添加的文件, `1574843457, 1574903339`为导出模型版本号
 
 ```
 model_config_list {
@@ -135,6 +140,7 @@ model_config_list {
     model_version_policy {
         specific {
             versions: 1574843457
+            versions: 1574903339
         }
     }
   }
