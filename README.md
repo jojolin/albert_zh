@@ -215,9 +215,10 @@ def predict(input_ids, input_mask, segment_ids, label_ids, hostport_http, versio
     return [np.argmax(x) for pred in predictions for x in pred ]
 ``` 
 
-- 模型预测结果tiny:
-
+- 模型预测结果
 ```
+tiny:
+
 ['查/v', '一下/m', '餐/nz', '包/n', '有/v', '哪些/r', '做法/n']
 ['瘦肉末/nz', '或者/c', '猪肉丸/nz', '能/v', '做/v', '什么/r']
 ['猪肉/n', '丁/nz', '可以/v', '和/p', '什么/r', '一起/d', '煮汤/vn']
@@ -226,11 +227,22 @@ def predict(input_ids, input_mask, segment_ids, label_ids, hostport_http, versio
 ['能/v', '介绍/v', '些/q', '养颜/vn', '美容/vn', '的/u', '食物/n', '吗/xc']
 ['健康/a', '饮食：/n', '怎样/d', '吃/v', '海鲜/n', '更/d', '安全/a']
 ['吃/v', '大闸蟹/nz', '应该/v', '注意/v', '什么/r']
+
+base:
+['查一/nz', '下/f', '餐包/n', '有/v', '哪些/r', '做法/n']
+['瘦肉末/nz', '或者/c', '猪肉丸/nz', '能/v', '做/v', '什么/r']
+['猪肉丁/nz', '可以/v', '和/p', '什么/r', '一起/d', '煮汤/v']
+['看看/v', '蒜香排骨/nz', '的/u', '做法/n']
+['如何/c', '调理/v', '不正常/a', '的/u', '日常/a', '膳食/n']
+['能/v', '介绍/v', '些/q', '养颜/vn', '美容/vn', '的/u', '食物/n', '吗/xc']
+['健康/a', '饮食/n', '：/w', '怎样/d', '吃/v', '海鲜/n', '更/a', '安全/a']
+['吃/v', '大闸蟹/nz', '应该/v', '注意/v', '什么/r']
 ```
+
 - 预测性能
   - gpu: GeForce RTX 2080-ti
-  - [tiny版](https://storage.googleapis.com/albert_zh/albert_tiny_489k.zip): 单线程，200个请求, ~6s/~3s (no gpu/gpu)
-  - [base版](https://storage.googleapis.com/albert_zh/albert_base_zh_additional_36k_steps.zip): 单线程，100个请求, ~10s/~5s(no gpu/gpu)
+  - [tiny版](https://storage.googleapis.com/albert_zh/albert_tiny_489k.zip): 单线程，200个请求, ~5.6s/~4.5s (no gpu/gpu)
+  - [base版](https://storage.googleapis.com/albert_zh/albert_base_zh_additional_36k_steps.zip): 单线程，200个请求, ~20s/~6.2s(no gpu/gpu)
 
 - 准确性
 
@@ -249,8 +261,11 @@ global_step = 18748
 loss = 335.19763
 
 base版
-# TODO: 
-
+Eval results albert_base_remy_lac_checkpoints/model.ckpt-18748
+eval_accuracy = 0.96240944
+eval_loss = 0.41811892
+global_step = 18748
+loss = 426.6612
 ```
 
 ## Thanks
