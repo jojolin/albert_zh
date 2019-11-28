@@ -272,6 +272,13 @@ eval_accuracy = 0.96240944
 eval_loss = 0.41811892
 global_step = 18748
 loss = 426.6612
+
+large版(batch_size=16)
+Eval results albert_large_remy_lac_checkpoints/model.ckpt-37496
+eval_accuracy = 0.96251875
+eval_loss = 0.45184305
+global_step = 37496
+loss = 461.07434
 ```
 
 ## Thanks
