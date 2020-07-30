@@ -1,0 +1,4 @@
+requests==2.20.0
+numpy==1.15.4
+tensorflow==1.12.0
+tensorflow-serving-api==1.13.0

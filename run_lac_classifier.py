@@ -138,7 +138,7 @@ flags.DEFINE_integer(
 class InputExample(object):
   """A single training/test example for simple sequence classification."""
 
-  def __init__(self, guid, text_a, text_b=None, label=None):
+  def __init__(self, guid, text_a, text_b=None, label=None, cls_label=None):
     """Constructs a InputExample.
     Args:
       guid: Unique id for the example.
@@ -153,6 +153,7 @@ class InputExample(object):
     self.text_a = text_a
     self.text_b = text_b
     self.label = label
+    self.cls_label = cls_label
 
 
 class PaddingInputExample(object):
@@ -211,16 +212,13 @@ class DataProcessor(object):
         lines.append(line)
       return lines
 
-def convert_single_example(ex_index, example, label_list, max_seq_length, tokenizer, mode):
-    label_map = {}
-    for (i, label) in enumerate(label_list,1):
-        label_map[label] = i
-    with open(os.path.join(FLAGS.output_dir, 'label2id.pkl'),'wb') as w:
-        pickle.dump(label_map,w)
+def convert_single_example(ex_index, example, label_map, max_seq_length, tokenizer, mode):
     textlist = example.text_a.split('\x02')
     labellist = example.label.split('\x02')
-    if ex_index < 2:
-        print(textlist, labellist)
+    cls_label = example.cls_label
+
+    if ex_index < 1:
+        print(textlist, cls_label, labellist)
         print(label_map)
         print(len(textlist), len(labellist))
     if len(textlist) != len(labellist):
@@ -250,7 +248,8 @@ def convert_single_example(ex_index, example, label_list, max_seq_length, tokeni
 
     ntokens.append("[CLS]")
     nlabels.append("[CLS]")
-    label_ids.append(label_map["[CLS]"]) # append("O") or append("[CLS]") not sure!
+    #label_ids.append(label_map["[CLS]"]) # append("O") or append("[CLS]") not sure!
+    label_ids.append(label_map[cls_label]) # add classifier label
     segment_ids.append(0)
 
     for i, token in enumerate(tokens):
@@ -294,14 +293,14 @@ def convert_single_example(ex_index, example, label_list, max_seq_length, tokeni
         tf.logging.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
         tf.logging.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
         tf.logging.info("label_ids: %s" % " ".join([str(x) for x in label_ids]))
+        tf.logging.info("cls_label: %s" % cls_label)
         #tf.logging.info("label_mask: %s" % " ".join([str(x) for x in label_mask]))
 
     feature = InputFeatures(
         input_ids=input_ids,
         input_mask=input_mask,
         segment_ids=segment_ids,
-        label_id=label_ids,
-        #label_mask = label_mask
+        label_id=label_ids
     )
 
     if mode == "test":
@@ -338,12 +337,18 @@ def file_based_convert_examples_to_features(
   """Convert a set of `InputExample`s to a TFRecord file."""
 
   writer = tf.python_io.TFRecordWriter(output_file)
+  label_map = {}
+  for (i, label) in enumerate(label_list, 1):
+      label_map[label] = i
+
+  with open(os.path.join(FLAGS.output_dir, 'label2id.pkl'),'wb') as w:
+      pickle.dump(label_map, w)
 
   for (ex_index, example) in enumerate(examples):
     if ex_index % 5000 == 0:
       tf.logging.info("Writing example %d of %d" % (ex_index, len(examples)))
 
-    feature = convert_single_example(ex_index, example, label_list,
+    feature = convert_single_example(ex_index, example, label_map,
                                      max_seq_length, tokenizer, mode)
 
     def create_int_feature(values):
@@ -355,8 +360,7 @@ def file_based_convert_examples_to_features(
     features["input_mask"] = create_int_feature(feature.input_mask)
     features["segment_ids"] = create_int_feature(feature.segment_ids)
     features["label_ids"] = create_int_feature(feature.label_id)
-    features["is_real_example"] = create_int_feature(
-        [int(feature.is_real_example)])
+    features["is_real_example"] = create_int_feature([int(feature.is_real_example)])
 
     tf_example = tf.train.Example(features=tf.train.Features(feature=features))
     writer.write(tf_example.SerializeToString())
@@ -440,6 +444,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
       use_one_hot_embeddings=use_one_hot_embeddings)
 
   output_layer = model.get_sequence_output()
+  print('----------', output_layer.shape)
   hidden_size = output_layer.shape[-1].value
   output_weight = tf.get_variable(
       "output_weights", [num_labels, hidden_size],
@@ -451,7 +456,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
 
   with tf.variable_scope("loss"):
     ln_type = bert_config.ln_type
-    if ln_type == 'preln': # add by brightmart, 10-06. if it is preln, we need to an additonal layer: layer normalization as suggested in paper "ON LAYER NORMALIZATION IN THE TRANSFORMER ARCHITECTURE"
+    if ln_type == 'preln': 
         print("ln_type is preln. add LN layer.")
         output_layer=layer_norm(output_layer)
     else:
@@ -466,13 +471,43 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     logits = tf.nn.bias_add(logits, output_bias)
     logits = tf.reshape(logits, [-1, FLAGS.max_seq_length, num_labels])
 
+    probabilities = tf.nn.softmax(logits, axis=-1)
     log_probs = tf.nn.log_softmax(logits, axis=-1)
     one_hot_labels = tf.one_hot(labels, depth=num_labels, dtype=tf.float32)
     per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
     loss = tf.reduce_sum(per_example_loss)
-    probabilities = tf.nn.softmax(logits, axis=-1)
-    return (loss, per_example_loss, logits, probabilities)
+    total_loss = tf.add(loss, classify_loss(bert_config, model, labels, num_labels, is_training))
 
+  return (total_loss, per_example_loss, logits, probabilities)
+  #return (loss, per_example_loss, logits, probabilities)
+
+def classify_loss(bert_config, model, labels, num_labels, is_training):
+  output_layer = model.get_pooled_output()
+  print('cls----------', output_layer.shape)
+  print('cls----------', labels.shape) # [32, 128]
+  hidden_size = output_layer.shape[-1].value
+  output_weights = tf.get_variable(
+      "cls_output_weights", [num_labels, hidden_size],
+      initializer=tf.truncated_normal_initializer(stddev=0.02))
+  output_bias = tf.get_variable(
+      "cls_output_bias", [num_labels], initializer=tf.zeros_initializer())
+  with tf.variable_scope("loss"):
+    ln_type = bert_config.ln_type
+    if ln_type == 'preln': 
+        print("ln_type is preln. add LN layer.")
+        output_layer=layer_norm(output_layer)
+    else:
+        print("ln_type is postln or other,do nothing.")
+    if is_training:
+      output_layer = tf.nn.dropout(output_layer, keep_prob=0.9)
+    logits = tf.matmul(output_layer, output_weights, transpose_b=True)
+    logits = tf.nn.bias_add(logits, output_bias)
+    probabilities = tf.nn.softmax(logits, axis=-1)
+    log_probs = tf.nn.log_softmax(logits, axis=-1)
+    one_hot_labels = tf.one_hot(tf.transpose(labels)[0], depth=num_labels, dtype=tf.float32)
+    per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1) 
+    loss = tf.reduce_mean(per_example_loss)
+    return loss * 30
 
 def layer_norm(input_tensor, name=None):
   """Run layer normalization on the last dimension of the tensor."""
@@ -504,8 +539,8 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
     (total_loss, per_example_loss, logits, probabilities) = create_model(
-        bert_config, is_training, input_ids, input_mask, segment_ids, label_ids,
-        num_labels, use_one_hot_embeddings)
+        bert_config, is_training, input_ids, input_mask, segment_ids, 
+        label_ids, num_labels, use_one_hot_embeddings)
 
     tvars = tf.trainable_variables()
     initialized_variable_names = {}
@@ -562,7 +597,8 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
           eval_metrics=eval_metrics,
           scaffold_fn=scaffold_fn)
     else:
-      predictions={"probabilities": probabilities} 
+      predictions={
+        "probabilities": probabilities} 
       output = {'serving_default': tf.estimator.export.PredictOutput(predictions)}
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
@@ -647,15 +683,17 @@ class RemyProcesser(DataProcessor):
                     # case: 单个测试句子1行
                     sen = list(line.strip())
                     label = '\x02'.join(['O'] * len(sen))
+                    cls_label = '[CLS]'
                     sen = '\x02'.join(sen)
                     print(sen)
                     print(label)
                 else:
-                    sen, label = line.strip().split('\t')
+                    sen, label, cls_label = line.strip().split('\t')
 
                 text_a = tokenization.convert_to_unicode(sen)
                 label = tokenization.convert_to_unicode(label)
-                examples.append(InputExample(guid=guid, text_a=text_a, label=label))
+                cls_label = tokenization.convert_to_unicode(cls_label)
+                examples.append(InputExample(guid=guid, text_a=text_a, label=label, cls_label=cls_label))
         return examples
 
     def get_train_examples(self, data_dir):
@@ -671,24 +709,6 @@ class RemyProcesser(DataProcessor):
         with open(os.path.join(FLAGS.data_dir, 'label_class.txt'), 'r', encoding='utf8') as r:
             return [x.strip() for x in r.readlines()]
 
-
-
-# This function is not used by this file but is still used by the Colab and
-# people who depend on it.
-def convert_examples_to_features(examples, label_list, max_seq_length,
-                                 tokenizer):
-  """Convert a set of `InputExample`s to a list of `InputFeatures`."""
-
-  features = []
-  for (ex_index, example) in enumerate(examples):
-    if ex_index % 10000 == 0:
-      tf.logging.info("Writing example %d of %d" % (ex_index, len(examples)))
-
-    feature = convert_single_example(ex_index, example, label_list,
-                                     max_seq_length, tokenizer)
-
-    features.append(feature)
-  return features
 
 
 def main(_):
@@ -756,7 +776,7 @@ def main(_):
 
   model_fn = model_fn_builder(
       bert_config=bert_config,
-      num_labels=len(label_list),
+      num_labels=len(label_list)+1,
       init_checkpoint=FLAGS.init_checkpoint,
       learning_rate=FLAGS.learning_rate,
       num_train_steps=num_train_steps,
@@ -776,7 +796,7 @@ def main(_):
 
   if FLAGS.do_train:
     train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
-    train_file_exists=os.path.exists(train_file)
+    train_file_exists = os.path.exists(train_file)
     print("###train_file_exists:", train_file_exists," ;train_file:",train_file)
     if not train_file_exists: # if tf_record file not exist, convert from raw text file. # TODO
         file_based_convert_examples_to_features(train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
@@ -909,6 +929,11 @@ def main(_):
         if i >= num_actual_predict_examples:
           break
         label_ids = [np.argmax(prob) for prob in probabilities]
+        #label_ids = []
+        #for prob in probabilities:
+        #    label_ids.append(np.argmax(prob))
+
+        print(label_ids)
         predict_label = '\x02'.join([id2label[label_id] for label_id in label_ids if label_id != 0])
         writer.write('{}\tlabel:{}\tpredict:{}\n'.format(pred_example.text_a, pred_example.label, predict_label))
         num_written_lines += 1
