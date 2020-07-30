@@ -250,6 +250,9 @@ base:
   - [tiny版](https://storage.googleapis.com/albert_zh/albert_tiny_489k.zip): 单线程，200个请求, ~5.6s/~4.5s (no gpu/gpu)
   - [base版](https://storage.googleapis.com/albert_zh/albert_base_zh_additional_36k_steps.zip): 单线程，200个请求, ~20s/~6.2s(no gpu/gpu)
 
+  - gpu: GeForce RTX 2080-ti
+  - [base版](https://storage.googleapis.com/albert_zh/albert_base_zh_additional_36k_steps.zip): 单线程，1000个请求, ~25s/~12.5s(gpu, http/grpc)
+
 - 准确性
 
 ```
