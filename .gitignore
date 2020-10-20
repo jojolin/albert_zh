@@ -1,2 +1,4 @@
 __pycache__
 *.pyc
+albert_*_checkpoints*
+export_serving_*

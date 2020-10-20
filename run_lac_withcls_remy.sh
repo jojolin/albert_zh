@@ -10,8 +10,8 @@
 # init_checkpoint=./$OUTPUT_DIR/model.ckpt-1874
 
 # # tiny model
-export BERT_BASE_DIR=/data1/albert/zh/albert_tiny_489k
-bert_config_file=$BERT_BASE_DIR/albert_config_tiny.json
+#export BERT_BASE_DIR=/data1/albert/zh/albert_tiny_489k
+#bert_config_file=$BERT_BASE_DIR/albert_config_tiny.json
 
 # base model
 export BERT_BASE_DIR=/data1/albert/zh/albert_base_zh
@@ -38,7 +38,7 @@ bert_config_file=$BERT_BASE_DIR/albert_config_base.json
 export DATA_DIR=/data1/remy_datasets/remy/lac/2_0
 export OUTPUT_DIR=albert_base_remy_lac_withcls_cooking_others_checkpoints	# cooking && others
 export_dir=./export_serving_base_remy_lac_withcls_cooking_others
-init_checkpoint=./$OUTPUT_DIR/model.ckpt-20312
+init_checkpoint=./$OUTPUT_DIR/model.ckpt-93750
 
 mode=$1
 
@@ -53,7 +53,7 @@ python3 run_lac_classifier.py \
 	-max_seq_length=128 \
 	-train_batch_size=32 \
 	--learning_rate=1e-4 \
-	-num_train_epochs=5 \
+	-num_train_epochs=20 \
 	--output_dir=$OUTPUT_DIR \
 	-init_checkpoint=$BERT_BASE_DIR/albert_model.ckpt
 

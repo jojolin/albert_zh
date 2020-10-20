@@ -174,11 +174,13 @@ class InputFeatures(object):
                input_mask,
                segment_ids,
                label_id,
+               cls_label_id,
                is_real_example=True):
     self.input_ids = input_ids
     self.input_mask = input_mask
     self.segment_ids = segment_ids
     self.label_id = label_id
+    self.cls_label_id = cls_label_id
     self.is_real_example = is_real_example
 
 
@@ -211,16 +213,26 @@ class DataProcessor(object):
         lines.append(line)
       return lines
 
-def convert_single_example(ex_index, example, label_list, max_seq_length, tokenizer, mode):
+def convert_single_example(ex_index, example, label_list, cls_label_list, max_seq_length, tokenizer, mode):
     label_map = {}
     for (i, label) in enumerate(label_list,1):
         label_map[label] = i
     with open(os.path.join(FLAGS.output_dir, 'label2id.pkl'),'wb') as w:
         pickle.dump(label_map,w)
+
+    cls_label_map = {}
+    for (i, label) in enumerate(cls_label_list,1):
+        cls_label_map[label] = i
+    with open(os.path.join(FLAGS.output_dir, 'cls_label2id.pkl'),'wb') as w:
+        pickle.dump(cls_label_map, w)
+
     textlist = example.text_a.split('\x02')
     labellist = example.label.split('\x02')
-    if ex_index < 2:
-        print(textlist, labellist)
+    cls_label = example.cls_label
+    cls_label_id = cls_label_map[cls_label]
+
+    if ex_index < 1:
+        print(textlist, cls_label, labellist)
         print(label_map)
         print(len(textlist), len(labellist))
     if len(textlist) != len(labellist):
@@ -250,7 +262,8 @@ def convert_single_example(ex_index, example, label_list, max_seq_length, tokeni
 
     ntokens.append("[CLS]")
     nlabels.append("[CLS]")
-    label_ids.append(label_map["[CLS]"]) # append("O") or append("[CLS]") not sure!
+    #label_ids.append(label_map["[CLS]"]) # append("O") or append("[CLS]") not sure!
+    label_ids.append(cls_label_id) # append("O") or append("[CLS]") not sure!
     segment_ids.append(0)
 
     for i, token in enumerate(tokens):
@@ -294,6 +307,8 @@ def convert_single_example(ex_index, example, label_list, max_seq_length, tokeni
         tf.logging.info("input_mask: %s" % " ".join([str(x) for x in input_mask]))
         tf.logging.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
         tf.logging.info("label_ids: %s" % " ".join([str(x) for x in label_ids]))
+        tf.logging.info("cls_label: %s" % cls_label)
+        tf.logging.info("cls_label_ids: %s" % label_ids)
         #tf.logging.info("label_mask: %s" % " ".join([str(x) for x in label_mask]))
 
     feature = InputFeatures(
@@ -301,7 +316,7 @@ def convert_single_example(ex_index, example, label_list, max_seq_length, tokeni
         input_mask=input_mask,
         segment_ids=segment_ids,
         label_id=label_ids,
-        #label_mask = label_mask
+        cls_label_id=cls_label_id
     )
 
     if mode == "test":
@@ -355,6 +370,7 @@ def file_based_convert_examples_to_features(
     features["input_mask"] = create_int_feature(feature.input_mask)
     features["segment_ids"] = create_int_feature(feature.segment_ids)
     features["label_ids"] = create_int_feature(feature.label_id)
+    features["cls_label_ids"] = create_int_feature(feature.cls_label_id)
     features["is_real_example"] = create_int_feature(
         [int(feature.is_real_example)])
 
@@ -429,7 +445,9 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
 
 
 def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
-                 labels, num_labels, use_one_hot_embeddings):
+                 labels, num_labels, 
+                 cls_labels, cls_num_labels,
+                 use_one_hot_embeddings):
   """Creates a classification model."""
   model = modeling.BertModel(
       config=bert_config,
@@ -471,7 +489,37 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)
     loss = tf.reduce_sum(per_example_loss)
     probabilities = tf.nn.softmax(logits, axis=-1)
-    return (loss, per_example_loss, logits, probabilities)
+
+  ##### classify loss #####
+  cls_output_layer = model.get_pooled_output()
+  cls_hidden_size = output_layer.shape[-1].value
+  cls_output_weights = tf.get_variable(
+    "output_weights", [cls_num_labels, cls_hidden_size],
+    initializer=tf.truncated_normal_initializer(stddev=0.02))
+  cls_output_bias = tf.get_variable(
+    "output_bias", [cls_num_labels], initializer=tf.zeros_initializer())
+  with tf.variable_scope("cls_loss"):
+    ln_type = bert_config.ln_type
+    if ln_type == 'preln': 
+        print("ln_type is preln. add LN layer.")
+        cls_output_layer=layer_norm(cls_output_layer)
+    else:
+        print("ln_type is postln or other,do nothing.")
+
+    if is_training:
+      cls_output_layer = tf.nn.dropout(cls_output_layer, keep_prob=0.9)
+      cls_logits = tf.matmul(cls_output_layer, cls_output_weights, transpose_b=True)
+      cls_logits = tf.nn.bias_add(cls_logits, cls_output_bias)
+      cls_probabilities = tf.nn.softmax(cls_logits, axis=-1)
+      cls_log_probs = tf.nn.log_softmax(cls_logits, axis=-1)
+
+      cls_one_hot_labels = tf.one_hot(cls_labels, depth=cls_num_labels, dtype=tf.float32)
+      cls_per_example_loss = -tf.reduce_sum(cls_one_hot_labels * cls_log_probs, axis=-1)
+      cls_loss = tf.reduce_mean(cls_per_example_loss)
+
+  total_loss = loss + cls_loss
+
+  return (total_loss, per_example_loss, logits, probabilities, cls_probabilities)
 
 
 def layer_norm(input_tensor, name=None):
@@ -479,7 +527,7 @@ def layer_norm(input_tensor, name=None):
   return tf.contrib.layers.layer_norm(
       inputs=input_tensor, begin_norm_axis=-1, begin_params_axis=-1, scope=name)
 
-def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
+def model_fn_builder(bert_config, num_labels, cls_num_labels, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
                      use_one_hot_embeddings):
   """Returns `model_fn` closure for TPUEstimator."""
@@ -495,6 +543,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
     input_mask = features["input_mask"]
     segment_ids = features["segment_ids"]
     label_ids = features["label_ids"]
+    cls_label_ids = features["cls_label_ids"]
     is_real_example = None
     if "is_real_example" in features:
       is_real_example = tf.cast(features["is_real_example"], dtype=tf.float32)
@@ -503,9 +552,11 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
 
-    (total_loss, per_example_loss, logits, probabilities) = create_model(
-        bert_config, is_training, input_ids, input_mask, segment_ids, label_ids,
-        num_labels, use_one_hot_embeddings)
+    (total_loss, per_example_loss, logits, probabilities, cls_probabilities) = create_model(
+        bert_config, is_training, input_ids, input_mask, segment_ids, 
+        label_ids, num_labels, 
+        cls_label_ids, cls_num_labels,
+        use_one_hot_embeddings)
 
     tvars = tf.trainable_variables()
     initialized_variable_names = {}
@@ -562,7 +613,9 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
           eval_metrics=eval_metrics,
           scaffold_fn=scaffold_fn)
     else:
-      predictions={"probabilities": probabilities} 
+      predictions={
+        "probabilities": probabilities, 
+        "cls_probabilities": cls_probabilities} 
       output = {'serving_default': tf.estimator.export.PredictOutput(predictions)}
       output_spec = tf.contrib.tpu.TPUEstimatorSpec(
           mode=mode,
@@ -723,6 +776,7 @@ def main(_):
   processor = processors[task_name]()
 
   label_list = processor.get_labels()
+  cls_label_list = processor.get_cls_labels()
 
   tokenizer = tokenization.FullTokenizer(
       vocab_file=FLAGS.vocab_file, do_lower_case=FLAGS.do_lower_case)
@@ -757,6 +811,7 @@ def main(_):
   model_fn = model_fn_builder(
       bert_config=bert_config,
       num_labels=len(label_list),
+      cls_num_labels=len(cls_label_list),
       init_checkpoint=FLAGS.init_checkpoint,
       learning_rate=FLAGS.learning_rate,
       num_train_steps=num_train_steps,
